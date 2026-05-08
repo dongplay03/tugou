@@ -1,0 +1,21 @@
+{
+  "name": "aveai-playwright-collector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright-based scraper to collect Ave.ai metrics and export JSON/CSV for integration",
+  "main": "index.js",
+  "scripts": {
+    "collect": "node index.js",
+    "test": "echo \"No tests configured for this collector.\""
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "playwright": "^1.40.0",
+    "path": "^0.12.7",
+    "fs": "^0.0.1-security"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT"
+}

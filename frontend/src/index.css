@@ -1,0 +1,197 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Rajdhani:wght@500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Trading workspace palette */
+  --color-primary: #ffb84d;
+  --color-primary-light: #ffe1ab;
+  --color-primary-dark: #d78518;
+  --color-accent: #3dd7c4;
+  --color-accent-light: #9cf3e7;
+  --color-success: #44d492;
+  --color-danger: #ff6b7a;
+  --color-warning: #f8c15c;
+
+  --color-bg-primary: #070b12;
+  --color-bg-secondary: rgba(8, 13, 22, 0.92);
+  --color-bg-card: rgba(11, 18, 30, 0.86);
+  --color-bg-card-hover: rgba(16, 26, 42, 0.96);
+
+  /* Text hierarchy */
+  --color-text-primary: #e8edf5;
+  --color-text-secondary: #8fa3ba;
+  --color-text-muted: #4d6378;
+  --color-border: rgba(100, 140, 180, 0.1);
+
+  /* Neon glow accents */
+  --color-glow-cyan: rgba(61, 215, 196, 0.15);
+  --color-glow-amber: rgba(255, 184, 77, 0.12);
+  --color-glow-danger: rgba(255, 107, 122, 0.12);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(61, 215, 196, 0.04), rgba(5, 10, 18, 0) 42%, rgba(255, 184, 77, 0.035));
+  pointer-events: none;
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+@layer components {
+  /* Card surface */
+  .bg-bg-card {
+    backdrop-filter: blur(18px) saturate(1.05);
+    -webkit-backdrop-filter: blur(18px) saturate(1.05);
+    border: 1px solid var(--color-border);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .bg-bg-card:hover {
+    border-color: rgba(100, 140, 180, 0.18);
+    box-shadow: 0 14px 38px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  }
+
+  .terminal-panel {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .terminal-panel::before {
+    display: none;
+  }
+
+  .terminal-panel::after {
+    display: none;
+  }
+
+  /* Panel title - Rajdhani for tech feel */
+  .panel-title {
+    font-family: 'Rajdhani', 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  /* Metric chip with glow states */
+  .metric-chip {
+    border: 1px solid var(--color-border);
+    background: rgba(8, 16, 28, 0.6);
+    backdrop-filter: blur(12px);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8125rem;
+    transition: all 150ms ease;
+  }
+
+  .metric-chip.positive {
+    border-color: rgba(68, 212, 146, 0.2);
+    background: rgba(68, 212, 146, 0.06);
+    color: #44d492;
+  }
+
+  .metric-chip.negative {
+    border-color: rgba(255, 107, 122, 0.2);
+    background: rgba(255, 107, 122, 0.06);
+    color: #ff6b7a;
+  }
+
+  .metric-chip.warning {
+    border-color: rgba(248, 193, 92, 0.2);
+    background: rgba(248, 193, 92, 0.06);
+    color: #f8c15c;
+  }
+
+  /* Data grid with content-visibility optimization */
+  .data-grid {
+    content-visibility: auto;
+    contain-intrinsic-size: 540px;
+  }
+
+  /* Glow text for important values */
+  .glow-text {
+    text-shadow: 0 0 20px currentColor;
+  }
+
+  /* Pulse animation for live indicators */
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .pulse-live {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  /* Subtle shimmer for loading states */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .shimmer-loading {
+    background: linear-gradient(90deg,
+      transparent 25%,
+      rgba(61, 215, 196, 0.05) 50%,
+      transparent 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+  }
+}
+
+/* Custom scrollbar - thin, subtle */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 140, 180, 0.15);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 140, 180, 0.3);
+}
+
+/* Selection color */
+::selection {
+  background: rgba(61, 215, 196, 0.25);
+  color: #e8edf5;
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
