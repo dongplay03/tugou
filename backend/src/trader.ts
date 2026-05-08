@@ -39,7 +39,7 @@ export function openTrade(token: TokenData): { trade: Trade; alert: Alert } | nu
   }
 
   // === Narrative exposure control (Optimization 5) ===
-  // Don't let >40% of total position value be in the same narrative sector
+  // Don't let >55% of total position value be in the same narrative sector
   const tokenNarratives = detectNarratives(token.name, token.symbol);
   if (tokenNarratives.length > 0 && openTrades.length > 0) {
     const totalOpenValue = openTrades.reduce((s, t) => s + t.amountSOL * t.currentRoi / 100 + t.amountSOL, 0);
@@ -48,8 +48,8 @@ export function openTrade(token: TokenData): { trade: Trade; alert: Alert } | nu
       .reduce((s, t) => s + t.amountSOL, 0);
     const exposureRatio = totalOpenValue > 0 ? narrativeExposure / totalOpenValue : 0;
 
-    if (exposureRatio > 0.40) {
-      console.log(`[Trader] ⚠️ Narrative exposure ${tokenNarratives.join('/')} at ${(exposureRatio * 100).toFixed(0)}% > 40% cap, skipping ${token.symbol}`);
+    if (exposureRatio > 0.55) {
+      console.log(`[Trader] ⚠️ Narrative exposure ${tokenNarratives.join('/')} at ${(exposureRatio * 100).toFixed(0)}% > 55% cap, skipping ${token.symbol}`);
       return null;
     }
   }
@@ -84,7 +84,7 @@ export function openTrade(token: TokenData): { trade: Trade; alert: Alert } | nu
 
   for (const narrative of narratives) {
     const overlap = openTrades.filter(t => t.narrativeTags.includes(narrative)).length;
-    if (overlap >= 2) {
+    if (overlap >= 3) {
       console.log(`[Trader] Narrative correlation cap reached for ${narrative}, skipping ${token.symbol}`);
       return null;
     }
@@ -317,10 +317,21 @@ export function updateTradePrice(
       `🔴 Stop loss hit at ${(priceMultiplier).toFixed(2)}x (effective SL: ${effectiveStopLossMultiplier.toFixed(2)}x)`);
   }
 
-  // Aggressive experiments should free capital quickly when no edge appears.
-  if (isExperimentalStrategy(trade.experimentStrategy) && holdTimeHours >= rules.exits.experimentTimeoutHours && roi < 10) {
-    return closeTrade(trade, newPriceUsd, newPriceNative, 'closed-time',
-      `⏱️ ${rules.label} experiment timeout (${trade.experimentStrategy}) after ${(rules.exits.experimentTimeoutHours * 60).toFixed(0)}m with ${roi.toFixed(1)}% ROI`);
+  // 实验策略动量衰减退出：连续价格走弱就出场，不纯靠时间
+  if (isExperimentalStrategy(trade.experimentStrategy)) {
+    const recentPoints = db.getRecentTradePriceHistory(trade.id, 4);
+    const consecutiveDown = recentPoints.length >= 3 && recentPoints
+      .slice(-3)
+      .every((p, i, arr) => i === 0 || p.priceNative <= arr[i - 1].priceNative);
+
+    if (consecutiveDown && holdTimeHours >= 0.25 && roi < 5) {
+      return closeTrade(trade, newPriceUsd, newPriceNative, 'closed-time',
+        `📉 实验策略动量衰减 (${trade.experimentStrategy}): 连续走弱 + ROI ${roi.toFixed(1)}%`);
+    }
+    if (holdTimeHours >= rules.exits.experimentTimeoutHours && roi < 10) {
+      return closeTrade(trade, newPriceUsd, newPriceNative, 'closed-time',
+        `⏱️ ${rules.label} experiment timeout (${trade.experimentStrategy}) after ${(rules.exits.experimentTimeoutHours * 60).toFixed(0)}m with ${roi.toFixed(1)}% ROI`);
+    }
   }
 
   // === Check max hold time ===
@@ -497,6 +508,11 @@ function getDynamicTrailingStopPct(trade: Trade): number {
   const rules = getChainTradingRules(trade.chainId);
   const base = getBaseTrailingStopPct(trade.screeningScore, trade.chainId);
   const holdHours = (Date.now() - trade.entryTimestamp) / 3_600_000;
+
+  // 本金已全部回收 → 尾仓放飞，用很宽松的 trailing stop 捕捉大行情
+  if (trade.totalRecoveredSOL >= trade.initialAmountSOL) {
+    return Math.min(rules.exits.trailingMax, 0.50);
+  }
 
   if (points.length < 4) {
     return holdHours >= 24 ? Math.max(0.18, base - 0.05) : base;

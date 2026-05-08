@@ -74,10 +74,10 @@ const SOLANA_RULES: ChainTradingRules = {
   },
   exits: {
     tpSl: [
-      { minScore: 85, value: { tp: 5.5, sl: 0.58 } },
-      { minScore: 70, value: { tp: 3.6, sl: 0.64 } },
-      { minScore: 55, value: { tp: 2.4, sl: 0.70 } },
-      { minScore: 0, value: { tp: 1.8, sl: 0.76 } },
+      { minScore: 85, value: { tp: 5.5, sl: 0.72 } },
+      { minScore: 70, value: { tp: 3.6, sl: 0.75 } },
+      { minScore: 55, value: { tp: 2.4, sl: 0.78 } },
+      { minScore: 0, value: { tp: 1.8, sl: 0.80 } },
     ],
     experimentalMaxTp: 2.0,
     experimentalMinSl: 0.84,
@@ -92,7 +92,7 @@ const SOLANA_RULES: ChainTradingRules = {
       { minScore: 0, value: 0.18 },
     ],
     trailingMin: 0.13,
-    trailingMax: 0.38,
+    trailingMax: 0.55,
     tiered: {
       experimental: [
         { multiplier: 1.22, sellPct: 0.50, executed: false },
@@ -127,7 +127,7 @@ const SOLANA_RULES: ChainTradingRules = {
     },
   },
   ui: {
-    buyRules: ['分数 >= 45', '流动性 >= $25K', 'Mint/Freeze、Top10、LP/创建者优先验证'],
+    buyRules: ['分数 >= 45', '流动性 >= $15K', 'Mint/Freeze、Top10 优先验证'],
     sellRules: ['实验桶 30 分钟无优势就撤', '1.22x 起分批止盈，动量桶保留尾仓', '流动性跌 35% 或单周期跌 15% 直接 Rug 退出'],
     riskRules: ['SOL 新池数量多，允许更早入场，但必须小仓和快跑', '重点看权限未放弃、Top10 集中、LP 快速抽走'],
     dataSources: ['DexScreener pairs/profiles', 'Solana RPC authority/holders', 'RugCheck', 'GMGN/AVE 人工或可配置扩展'],

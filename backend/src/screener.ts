@@ -353,7 +353,10 @@ export function screenToken(
 
 
 function isTailPump(token: TokenData): boolean {
-  if (token.priceChange5m < 25 || token.priceChange1h <= 0) return false;
+  // 5m 涨幅不足 22% 或 1h 没涨不触发
+  if (token.priceChange5m < 22 || token.priceChange1h <= 0) return false;
+  // 1h 涨幅低于 30% 的正常启动不触发
+  if (token.priceChange1h < 30) return false;
   const fiveMinuteShare = token.priceChange5m / Math.max(token.priceChange1h, 0.01);
   const buyBurst = token.txnsBuys1h >= 20 && token.buyToSellRatio1h > 1.2;
   return fiveMinuteShare >= 0.65 && buyBurst;

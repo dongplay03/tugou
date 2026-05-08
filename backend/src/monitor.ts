@@ -111,13 +111,13 @@ export function startMonitoring() {
     });
   }, 45_000);
 
-  // Momentum watchpool update: every 20 seconds (aligned with price monitor)
+  // 价格监控 + 动量观察池更新：每 10 秒
   monitorInterval = setInterval(() => {
     monitorOpenPositions().catch(err => {
       console.error('[Monitor] Price monitoring error:', err);
       errorCount++;
     });
-  }, 20_000);
+  }, 10_000);
 
   // Portfolio snapshot: every 5 minutes
   snapshotInterval = setInterval(() => {
