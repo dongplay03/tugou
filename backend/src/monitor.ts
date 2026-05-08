@@ -109,7 +109,7 @@ export function startMonitoring() {
       console.error('[Monitor] Discovery error:', err);
       errorCount++;
     });
-  }, 120_000);
+  }, 45_000);
 
   // Momentum watchpool update: every 20 seconds (aligned with price monitor)
   monitorInterval = setInterval(() => {
@@ -437,47 +437,30 @@ async function collectScreeningExtras(
   }
 
   try {
-    // Phase 1: Get creator address + authorities in parallel
-    const [rawCreatorAddr, authorities] = await Promise.all([
-      getTokenCreator(tokenAddress).catch(() => null),
+    // Only fetch authorities + holders + smart money via RPC (skip creator + LP lock — too unreliable)
+    const [authorities, holders, smartMoney] = await Promise.all([
       checkTokenAuthorities(tokenAddress),
-    ]);
-
-    // Determine best creator address: prefer getTokenCreator, fallback to mintAuthority
-    let creatorAddr = rawCreatorAddr;
-    if (!creatorAddr || creatorAddr.startsWith('0x0000')) {
-      creatorAddr = authorities.mintAuthority;
-    }
-
-    // Phase 2: Run remaining checks in parallel, now with correct creator address
-    const [holders, lpLock, smartMoney] = await Promise.all([
       getTopHolders(tokenAddress),
-      checkLPLock(pair.pairAddress, creatorAddr).catch(() => null),
       checkSmartMoneyBuying(tokenAddress).catch(() => ({ buyerCount: 0, walletLabels: [], totalConfidence: 0 })),
     ]);
 
     extras.authorities = authorities;
     extras.holders = holders;
-    extras.lpLockInfo = lpLock;
+    extras.lpLockInfo = null; // disabled — RPC LP lock check was unreliable
     extras.smartMoneyBuyers = smartMoney.buyerCount;
+    extras.creatorProfile = null;
 
-    let aveCreatorProfile = null;
+    // AVE enrichment (API, not RPC) — keep this as it's more reliable
     if (isAveProviderEnabled()) {
       const ave = await fetchAveRiskSnapshot(tokenAddress, 'solana').catch(() => null);
       const holderCheck = aveSnapshotToHolderCheck(ave);
       if (holderCheck && holderCheck.top10Pct !== null) {
         extras.holders = holderCheck;
       }
-      aveCreatorProfile = aveSnapshotToCreatorProfile(ave, creatorAddr);
-    }
-
-    // Creator/dev analysis. Prefer AVE pump-dev launched-token history when available,
-    // then fall back to rough Solana RPC creator analysis.
-    if (aveCreatorProfile) {
-      extras.creatorProfile = aveCreatorProfile;
-    } else if (creatorAddr) {
-      const profile = await analyzeCreator(creatorAddr).catch(() => null);
-      extras.creatorProfile = profile;
+      const aveCreatorProfile = aveSnapshotToCreatorProfile(ave, null);
+      if (aveCreatorProfile) {
+        extras.creatorProfile = aveCreatorProfile;
+      }
     }
 
   } catch (err) {

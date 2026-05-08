@@ -57,7 +57,7 @@ const SOLANA_RULES: ChainTradingRules = {
   profile: '低手续费、高发行频率、价格节奏更快，优先抢早期动量但必须更快止盈和 Rug 退出。',
   screening: {
     minScore: 45,
-    minLiquidityUsd: 25_000,
+    minLiquidityUsd: 12_000,
     maxRugScore: 55,
     preferredDexes: ['raydium', 'meteora', 'orca', 'pump'],
   },

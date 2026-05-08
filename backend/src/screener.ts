@@ -112,11 +112,14 @@ export function screenToken(
   if (token.liquidityUsd >= 100_000) {
     passed.push(`✅ Liquidity $${(token.liquidityUsd / 1000).toFixed(0)}K (excellent)`);
     score += weights.liquidityDepth;
-  } else if (token.liquidityUsd >= 50_000) {
+  } else if (token.liquidityUsd >= 30_000) {
     passed.push(`⚠️ Liquidity $${(token.liquidityUsd / 1000).toFixed(0)}K (acceptable)`);
     score += weights.liquidityDepth * 0.6;
+  } else if (token.liquidityUsd >= 12_000) {
+    passed.push(`⚠️ Liquidity $${(token.liquidityUsd / 1000).toFixed(1)}K (low, pump.fun level)`);
+    score += weights.liquidityDepth * 0.3;
   } else {
-    failed.push(`❌ Liquidity $${(token.liquidityUsd / 1000).toFixed(1)}K < $50K`);
+    failed.push(`❌ Liquidity $${(token.liquidityUsd / 1000).toFixed(1)}K < $12K`);
   }
 
   // === 3. Volume/MC ratio ===
@@ -190,6 +193,10 @@ export function screenToken(
   if (momentum5m > 0 && momentum1h > 0 && momentum1h < 300) {
     passed.push(`✅ Positive momentum: 5m ${momentum5m.toFixed(1)}%, 1h ${momentum1h.toFixed(1)}%`);
     score += weights.buyPressure * 0.7;
+  } else if (momentum5m > 3 && momentum1h > -20 && momentum1h <= 0) {
+    // Dip reclaim: 5m bouncing while 1h still negative — early reversal signal
+    passed.push(`✅ Dip reclaim: 5m +${momentum5m.toFixed(1)}% while 1h ${momentum1h.toFixed(1)}% (early bounce)`);
+    score += weights.buyPressure * 0.6;
   } else if (momentum1h > -5 && momentum1h < 50) {
     passed.push(`⚠️ Neutral momentum: 1h ${momentum1h.toFixed(1)}%`);
     score += weights.buyPressure * 0.3;
@@ -207,7 +214,10 @@ export function screenToken(
   // === 8. Freshness bonus ===
   if (token.pairCreatedAt > 0) {
     const ageHours = (Date.now() - token.pairCreatedAt) / 3_600_000;
-    if (ageHours < 24) {
+    if (ageHours < 2) {
+      passed.push(`✅ Very fresh: ${(ageHours * 60).toFixed(0)}m old (maximum alpha)`);
+      score += weights.freshness * 1.5;
+    } else if (ageHours < 24) {
       passed.push(`✅ Fresh: ${ageHours.toFixed(0)}h old (early opportunity)`);
       score += weights.freshness;
     } else if (ageHours < 72) {
@@ -343,7 +353,7 @@ export function screenToken(
 
 
 function isTailPump(token: TokenData): boolean {
-  if (token.priceChange5m < 12 || token.priceChange1h <= 0) return false;
+  if (token.priceChange5m < 25 || token.priceChange1h <= 0) return false;
   const fiveMinuteShare = token.priceChange5m / Math.max(token.priceChange1h, 0.01);
   const buyBurst = token.txnsBuys1h >= 20 && token.buyToSellRatio1h > 1.2;
   return fiveMinuteShare >= 0.65 && buyBurst;
