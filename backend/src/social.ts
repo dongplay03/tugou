@@ -181,13 +181,13 @@ export function getSocialScoreAdjustment(pair: DexScreenerPair): {
   const { score, reasons } = analyzeSocialSignals(pair);
 
   if (score >= 60) {
-    return { adjustment: 8, label: '✅ Strong social presence (+8)' };
+    return { adjustment: 4, label: '✅ Social presence (+4)' };
   } else if (score >= 30) {
-    return { adjustment: 3, label: '⚠️ Moderate social presence (+3)' };
+    return { adjustment: 2, label: '⚠️ Some social presence (+2)' };
   } else if (score > 0) {
     return { adjustment: 0, label: 'ℹ️ Minimal social presence' };
   } else {
-    return { adjustment: -5, label: '❌ No social presence (-5)' };
+    return { adjustment: -3, label: '❌ No social presence (-3)' };
   }
 }
 

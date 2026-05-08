@@ -12,13 +12,20 @@
 export const NARRATIVE_PATTERNS: Record<string, string[]> = {
   'AI':        ['AI', 'GPT', 'AGENT', 'NEURAL', 'BRAIN', 'INTEL', 'SENTIENT', 'LLM', 'OPENAI', 'CLAUDE'],
   'Political': ['TRUMP', 'BIDEN', 'MAGA', 'VOTE', 'ELECTION', 'PRESIDENT', 'GOV', 'CONGRESS'],
-  'Meme':      ['PEPE', 'DOGE', 'SHIB', 'BONK', 'WIF', 'FROG', 'MOON', 'BASED', 'CHAD', 'WOJAK'],
+  'Meme':      ['PEPE', 'DOGE', 'SHIB', 'BONK', 'WIF', 'FROG', 'BASED', 'CHAD', 'WOJAK'],
   'Celebrity': ['ELON', 'MUSK', 'DRAKE', 'KANYE', 'TAYLOR', 'SNOOP'],
   'DeFi':      ['DEFI', 'SWAP', 'YIELD', 'STAKE', 'FARM', 'PROTOCOL', 'LEND', 'VAULT'],
-  'Gaming':    ['GAME', 'PLAY', 'QUEST', 'NFT', 'PIXEL', 'ARENA', 'WORLD'],
-  'Dog':       ['DOG', 'DOGE', 'SHIB', 'WOOF', 'PUP', 'PAWS', 'BARK', 'INU'],
-  'Cat':       ['CAT', 'KITTY', 'MEOW', 'NYAN', 'KITTEN', 'PURR', 'POPCAT'],
+  'Gaming':    ['GAMING', 'PLAYTO', 'QUEST', 'ARENA'],
+  'Dog':       ['DOGECOIN', 'SHIBA', 'INU'],
+  'Cat':       ['POPCAT', 'KITTY'],
 };
+
+// Short keywords that require word-boundary matching to avoid false positives
+// e.g. "WORLD" should not match "MYWORLD", "CAT" should not match "CATCHER"
+const SHORT_KEYWORDS = new Set([
+  'AI', 'GPT', 'DOG', 'CAT', 'MOON', 'WORLD', 'PLAY', 'GAME', 'NFT',
+  'FROG', 'WIF', 'BASED', 'CHAD', 'GOV', 'VOTE',
+]);
 
 // ===== Dynamic patterns (auto-extracted from trending data) =====
 interface DynamicPattern {
@@ -54,9 +61,20 @@ export function detectNarrativeTags(name: string, symbol: string): string[] {
   // Static patterns
   for (const [narrative, keywords] of Object.entries(NARRATIVE_PATTERNS)) {
     for (const keyword of keywords) {
-      if (text.includes(keyword)) {
-        tags.push(narrative);
-        break;
+      if (SHORT_KEYWORDS.has(keyword)) {
+        // Short keywords: require word boundary match to avoid false positives
+        // e.g. "CAT" should not match "CATCHER", but should match "CAT COIN"
+        const re = new RegExp(`(?:^|[\\s_\\-.])${keyword}(?:[\\s_\\-.]|$)`);
+        if (re.test(text)) {
+          tags.push(narrative);
+          break;
+        }
+      } else {
+        // Long keywords: simple includes is fine
+        if (text.includes(keyword)) {
+          tags.push(narrative);
+          break;
+        }
       }
     }
   }

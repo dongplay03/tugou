@@ -454,12 +454,12 @@ export function getAIScoreAdjustment(result: AIAnalysisResult | null): {
   if (adj > 0) {
     return {
       adjustment: adj,
-      label: `🤖 AI: ${result.reasoning.slice(0, 80)}${flagStr} ${confStr} (+${adj})`,
+      label: `🤖 AI: ${result.reasoning.slice(0, 120)}${flagStr} ${confStr} (+${adj})`,
     };
   } else if (adj < 0) {
     return {
       adjustment: adj,
-      label: `🤖 AI: ${result.reasoning.slice(0, 80)}${flagStr} ${confStr} (${adj})`,
+      label: `🤖 AI: ${result.reasoning.slice(0, 120)}${flagStr} ${confStr} (${adj})`,
     };
   }
   return { adjustment: 0, label: `🤖 AI: neutral${confStr}` };

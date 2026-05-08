@@ -54,10 +54,10 @@ export function assessTokenRugRisk(
     reasons.push(`创建者持有 LP ${token.lpCreatorPct?.toFixed(0)}%`);
   }
 
-  if ((token.top10HolderPct ?? 0) > 60) {
+  if ((token.top10HolderPct ?? 0) > 80) {
     score += 35;
     reasons.push(`Top10 持仓 ${token.top10HolderPct?.toFixed(1)}%，高度集中`);
-  } else if ((token.top10HolderPct ?? 0) > 40) {
+  } else if ((token.top10HolderPct ?? 0) > 60) {
     score += 20;
     reasons.push(`Top10 持仓 ${token.top10HolderPct?.toFixed(1)}%，集中度偏高`);
   } else if (token.top10HolderPct === null && token.chainId === 'solana') {

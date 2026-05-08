@@ -121,12 +121,15 @@ export function screenToken(
 
   // === 3. Volume/MC ratio ===
   const volMcPct = token.volumeToMcRatio * 100;
-  if (volMcPct >= 10 && volMcPct <= 50) {
+  if (volMcPct >= 10 && volMcPct <= 500) {
     passed.push(`✅ Vol/MC ratio ${volMcPct.toFixed(1)}% (healthy activity)`);
     score += weights.volumeRatio;
-  } else if (volMcPct > 50) {
-    passed.push(`⚠️ Vol/MC ratio ${volMcPct.toFixed(1)}% (very high volume, potential hype)`);
+  } else if (volMcPct > 500 && volMcPct <= 2000) {
+    passed.push(`⚠️ Vol/MC ratio ${volMcPct.toFixed(1)}% (very high, potential hype)`);
     score += weights.volumeRatio * 0.7;
+  } else if (volMcPct > 2000) {
+    failed.push(`⚠️ Vol/MC ratio ${volMcPct.toFixed(1)}% (extreme, likely wash trading)`);
+    score += weights.volumeRatio * 0.3;
   } else if (volMcPct >= 5) {
     passed.push(`⚠️ Vol/MC ratio ${volMcPct.toFixed(1)}% (moderate)`);
     score += weights.volumeRatio * 0.4;
@@ -146,16 +149,18 @@ export function screenToken(
   }
 
   // === 5. Top 10 holder distribution ===
+  // Note: Solana top10 includes LP pools, DEX programs, burn addresses
+  // So thresholds are more lenient to account for this
   if (token.chainId !== 'solana' && token.top10HolderPct === null) {
     failed.push('ℹ️ EVM holder distribution not available yet');
   } else if (extras?.holders?.inconclusive) {
     failed.push(`⏸️ Holder check inconclusive: ${extras.holders.reason || 'RPC unavailable'} — entry allowed with smaller confidence`);
     score -= 3;
   } else if (token.top10HolderPct !== null) {
-    if (token.top10HolderPct < 30) {
+    if (token.top10HolderPct < 50) {
       passed.push(`✅ Top 10 hold ${token.top10HolderPct.toFixed(1)}% (well distributed)`);
       score += weights.holderDistribution;
-    } else if (token.top10HolderPct < 40) {
+    } else if (token.top10HolderPct < 70) {
       passed.push(`⚠️ Top 10 hold ${token.top10HolderPct.toFixed(1)}% (moderate concentration)`);
       score += weights.holderDistribution * 0.5;
     } else {
@@ -163,7 +168,7 @@ export function screenToken(
     }
   } else {
     failed.push('⏸️ Holder data unavailable');
-    inconclusive = true;
+    score -= 3;
   }
 
   // === 6. Buy pressure ===
@@ -182,13 +187,13 @@ export function screenToken(
   // === 7. Price momentum ===
   const momentum5m = token.priceChange5m;
   const momentum1h = token.priceChange1h;
-  if (momentum5m > 0 && momentum1h > 0 && momentum1h < 100) {
+  if (momentum5m > 0 && momentum1h > 0 && momentum1h < 300) {
     passed.push(`✅ Positive momentum: 5m ${momentum5m.toFixed(1)}%, 1h ${momentum1h.toFixed(1)}%`);
-    score += weights.smartMoneySignal * 0.7;
+    score += weights.buyPressure * 0.7;
   } else if (momentum1h > -5 && momentum1h < 50) {
     passed.push(`⚠️ Neutral momentum: 1h ${momentum1h.toFixed(1)}%`);
-    score += weights.smartMoneySignal * 0.3;
-  } else if (momentum1h > 100) {
+    score += weights.buyPressure * 0.3;
+  } else if (momentum1h >= 300) {
     failed.push(`⚠️ Overheated: 1h +${momentum1h.toFixed(0)}% (FOMO risk)`);
   } else {
     failed.push(`❌ Negative momentum: 1h ${momentum1h.toFixed(1)}%`);
@@ -328,7 +333,7 @@ export function screenToken(
     failed.push(`❌ ${rules.label} Rug score ${token.rugRiskScore} > ${rules.screening.maxRugScore}`);
   }
 
-  const eligible = !inconclusive &&
+  const eligible =
     score >= minScore &&
     token.liquidityUsd >= minLiquidity &&
     (token.rugRiskScore ?? 0) <= rules.screening.maxRugScore;
