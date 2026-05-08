@@ -5,11 +5,11 @@
 import type { Trade, TokenData, Alert, PriceUpdate, PortfolioSnapshot, DexScreenerPair, ChainId } from './types.js';
 import * as db from './database.js';
 import {
-  fetchTokenPrices, fetchTrendingTokens, fetchLatestProfiles,
+  fetchTokenPrices, fetchTrendingTokens, fetchLatestProfiles, fetchTokenDetails,
   pairToTokenData, checkTokenAuthorities, getTopHolders, searchNewTokens,
 } from './fetcher.js';
 import { screenToken, type ScreeningResult, type ScreeningExtras } from './screener.js';
-import { openTrade, updateTradePrice, getPortfolioState } from './trader.js';
+import { openTrade, updateTradePrice, getPortfolioState, tryAddToPosition } from './trader.js';
 import { checkAndOptimize } from './optimizer.js';
 import type { WsServerMessage } from './types.js';
 
@@ -33,6 +33,8 @@ import { preTradeBrowserReview } from './pre-trade-review.js';
 import { getPrimaryXTrendKeywords, openXTrendDiscoveryTabs, fetchElonTweetKeywords, matchTokenAgainstElonKeywords } from './x-trend-discovery.js';
 import { aveSnapshotToCreatorProfile, aveSnapshotToHolderCheck, fetchAveRiskSnapshot, isAveProviderEnabled } from './ave-provider.js';
 import { analyzeWithAI, getAIScoreAdjustment, getAICacheStats, cleanupAICache } from './ai-analyzer.js';
+import { startPoolWatcher, stopPoolWatcher, onNewPool, type NewPoolEvent } from './pool-watcher.js';
+import { startSmartMoneyWatcher, stopSmartMoneyWatcher, onSmartMoneyBuy, type SmartMoneyBuyEvent } from './smart-money-watcher.js';
 
 type BroadcastFn = (msg: WsServerMessage) => void;
 
@@ -97,6 +99,9 @@ export function startMonitoring() {
     },
   });
 
+  // 启动链上实时监听（秒级发现新池 + 聪明钱买入）
+  setupRealtimeWatchers();
+
   // Run initial discovery immediately
   runDiscovery().catch(err => {
     console.error('[Monitor] Initial discovery error:', err);
@@ -139,6 +144,10 @@ export async function stopMonitoring() {
   snapshotInterval = null;
 
   await waitForInFlightSettled();
+
+  // 停止链上实时监听
+  stopPoolWatcher();
+  stopSmartMoneyWatcher();
 
   console.log('[Monitor] ⏹️ Monitoring stopped');
 
@@ -725,6 +734,14 @@ async function monitorOpenPositions() {
       } else {
         broadcastFn({ type: 'trade_updated', data: result.trade });
         if (result.alert) broadcastFn({ type: 'alert', data: result.alert });
+
+        // 加仓检测：回调 15-25% + 已止盈过 + 利润加仓
+        const addResult = tryAddToPosition(result.trade, newPriceNative, newLiquidity);
+        if (addResult) {
+          broadcastFn({ type: 'trade_updated', data: addResult.trade });
+          broadcastFn({ type: 'alert', data: addResult.alert });
+          broadcastFn({ type: 'portfolio_update', data: getPortfolioState() });
+        }
       }
 
       priceUpdates.push({
@@ -786,3 +803,112 @@ function takeSnapshot() {
   db.saveSnapshot(snapshot);
   broadcastFn({ type: 'snapshot', data: snapshot });
 }
+
+// ===== 链上实时监听集成 =====
+function setupRealtimeWatchers() {
+  // 新池监听：检测到 Raydium/Pump.fun 新池 → 立即筛选
+  onNewPool(async (event: NewPoolEvent) => {
+    if (!isRunning) return;
+
+    console.log(`[Monitor] 🆕 链上新池: ${event.baseMint.slice(0, 12)}... (${event.source})`);
+
+    broadcastFn({
+      type: 'alert',
+      data: {
+        id: `alert-newpool-${Date.now()}`,
+        timestamp: Date.now(),
+        level: 'info',
+        title: `🆕 链上新池 (${event.source})`,
+        message: `检测到新池: ${event.baseMint.slice(0, 16)}...`,
+      },
+    });
+
+    // 等 3 秒让 DexScreener 索引到这个 token
+    await new Promise(r => setTimeout(r, 3000));
+
+    try {
+      const pairs = await fetchTokenDetails([event.baseMint], ACTIVE_CHAINS);
+      if (pairs.length === 0) {
+        // DexScreener 还没索引到，5 秒后重试一次
+        await new Promise(r => setTimeout(r, 5000));
+        const retryPairs = await fetchTokenDetails([event.baseMint], ACTIVE_CHAINS);
+        if (retryPairs.length === 0) return;
+        await processRealtimeDiscovery(retryPairs[0], `链上新池 (${event.source})`);
+      } else {
+        await processRealtimeDiscovery(pairs[0], `链上新池 (${event.source})`);
+      }
+    } catch (err) {
+      console.error('[Monitor] 新池处理错误:', err);
+    }
+  });
+
+  // 聪明钱买入监听：检测到聪明钱买新 token → 立即筛选
+  onSmartMoneyBuy(async (event: SmartMoneyBuyEvent) => {
+    if (!isRunning) return;
+
+    console.log(`[Monitor] 🐋 聪明钱买入: ${event.walletLabel} → ${event.tokenMint.slice(0, 12)}...`);
+
+    broadcastFn({
+      type: 'alert',
+      data: {
+        id: `alert-smbuy-${Date.now()}`,
+        timestamp: Date.now(),
+        level: 'success',
+        title: `🐋 聪明钱买入: ${event.walletLabel}`,
+        message: `${event.walletLabel} 刚买入 ${event.tokenMint.slice(0, 16)}...`,
+      },
+    });
+
+    // 等 2 秒
+    await new Promise(r => setTimeout(r, 2000));
+
+    try {
+      const pairs = await fetchTokenDetails([event.tokenMint], ACTIVE_CHAINS);
+      if (pairs.length > 0) {
+        await processRealtimeDiscovery(pairs[0], `聪明钱跟单 (${event.walletLabel})`);
+      }
+    } catch (err) {
+      console.error('[Monitor] 聪明钱跟单处理错误:', err);
+    }
+  });
+
+  // 启动两个 watcher
+  startPoolWatcher();
+  startSmartMoneyWatcher();
+}
+
+// 实时信号的快速筛选入场流程
+async function processRealtimeDiscovery(pair: DexScreenerPair, source: string) {
+  if (!isRunning) return;
+
+  const weights = db.getWeights();
+  const elonKw = await fetchElonTweetKeywords().catch(() => []);
+
+  const assessed = await buildAssessedToken(pair, weights, false, elonKw);
+  if (!assessed) return;
+
+  const { tokenData, result } = assessed;
+  // 实时发现的 token 额外加 8 分（信息优势）
+  tokenData.screeningScore += 8;
+  tokenData.screeningPassed = [...tokenData.screeningPassed, `🚀 ${source} (+8)`];
+
+  db.saveToken(tokenData);
+  tokensScreenedCount++;
+  broadcastFn({ type: 'token_discovered', data: tokenData });
+
+  if (tokenData.eligible) {
+    console.log(`[Monitor] 🎯 实时发现合格: ${tokenData.symbol} (Score: ${tokenData.screeningScore}, 来源: ${source})`);
+
+    // 实时信号直接入场，不走观察池
+    const tradeResult = openTrade(tokenData);
+    if (tradeResult) {
+      broadcastFn({ type: 'trade_opened', data: tradeResult.trade });
+      broadcastFn({ type: 'alert', data: tradeResult.alert });
+      broadcastFn({ type: 'portfolio_update', data: getPortfolioState() });
+    }
+  } else if (!isInWatchPool(tokenData.address) && !isConfirmed(tokenData.address)) {
+    addToWatchPool(tokenData.address, tokenData.symbol, tokenData.pairAddress);
+    console.log(`[Monitor] 👁️ 实时发现 ${tokenData.symbol} (Score: ${result.score}) → 观察池`);
+  }
+}
+

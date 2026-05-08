@@ -425,6 +425,67 @@ export function manualCloseTrade(tradeId: string): { trade: Trade; alert: Alert 
   return { trade: result.trade, alert: result.alert };
 }
 
+// ===== 加仓机制 =====
+// 条件：已执行至少 1 次阶梯止盈 + 价格从高点回调 15-25% + ROI 仍为正
+export function tryAddToPosition(
+  trade: Trade,
+  currentPriceNative: number,
+  currentLiquidity: number,
+): { trade: Trade; alert: Alert } | null {
+  const rules = getChainTradingRules(trade.chainId);
+  const cash = db.getCash(trade.chainId);
+
+  // 条件 1：至少执行过 1 次阶梯止盈
+  if (trade.tieredExitsExecuted < 1) return null;
+
+  // 条件 2：当前 ROI 仍为正（说明趋势没有反转）
+  if (trade.currentRoi <= 0) return null;
+
+  // 条件 3：价格从高点回调了 15-25%（不是在追高，而是回调加仓）
+  if (trade.highestPriceAfterRecovery <= 0) return null;
+  const pullback = 1 - (currentPriceNative / trade.highestPriceAfterRecovery);
+  if (pullback < 0.15 || pullback > 0.25) return null;
+
+  // 条件 4：流动性没有大幅下降（排除 rug 中的回调）
+  if (currentLiquidity < trade.liquidityAtEntry * 0.7) return null;
+
+  // 加仓金额：用已回收利润的 30%，不动本金
+  const profitAvailable = trade.totalRecoveredSOL - trade.initialAmountSOL;
+  if (profitAvailable <= 0) return null;
+
+  const addAmount = Math.min(
+    profitAvailable * 0.3,
+    cash * rules.position.maxCashFraction,
+    cash - rules.position.minCash,
+  );
+
+  if (addAmount < rules.position.minPosition) return null;
+
+  // 执行加仓
+  trade.amountSOL += addAmount;
+  trade.tokensAcquired += addAmount / currentPriceNative;
+
+  const alert: Alert = {
+    id: `alert-add-${Date.now()}-${trade.tokenSymbol}`,
+    timestamp: Date.now(),
+    level: 'success',
+    title: `📈 加仓: ${trade.tokenSymbol}`,
+    message: `回调 ${(pullback * 100).toFixed(0)}% 加仓 ${addAmount.toFixed(4)} ${rules.unit}（利润加仓，不动本金）`,
+    tokenSymbol: trade.tokenSymbol,
+    tokenAddress: trade.tokenAddress,
+  };
+
+  db.runInTransaction(() => {
+    db.setCash(cash - addAmount, trade.chainId);
+    db.saveTrade(trade);
+    db.saveAlert(alert);
+  });
+
+  console.log(`[Trader] 📈 加仓 ${trade.tokenSymbol}: +${addAmount.toFixed(4)} ${rules.unit} (回调 ${(pullback * 100).toFixed(0)}%, 利润加仓)`);
+
+  return { trade, alert };
+}
+
 // ===== Calculate portfolio state =====
 export function getPortfolioState(): PortfolioState {
   const openTrades = db.getOpenTrades();
