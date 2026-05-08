@@ -1,9 +1,10 @@
 // ===== 聪明钱实时交易监控 =====
 // 通过 Solana WebSocket 订阅聪明钱钱包的交易日志，
 // 秒级检测他们的新买入动作（而不是查"持仓"）。
+// v2: 用 getTransaction 解析实际买卖方向 + token mint
 
 import WebSocket from 'ws';
-import { getRpcUrl } from './rpc-client.js';
+import { getRpcUrl, rpcFetch } from './rpc-client.js';
 import { getAllSmartWallets } from './smart-money.js';
 
 type SmartMoneyBuyCallback = (event: SmartMoneyBuyEvent) => void;
@@ -27,7 +28,9 @@ let messageId = 100;
 const recentBuys = new Map<string, number>();
 const DEDUP_TTL = 5 * 60 * 1000;
 
-// 已知的 DEX program 地址（买卖交易一定会涉及这些）
+const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+
+// 已知 DEX program（用于快速过滤日志）
 const DEX_PROGRAMS = new Set([
   '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium V4
   'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',  // Jupiter
@@ -35,11 +38,12 @@ const DEX_PROGRAMS = new Set([
   '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',  // Pump.fun
 ]);
 
-const WSOL_MINT = 'So11111111111111111111111111111111111111112';
-
 function getWsUrl(): string {
-  const rpcUrl = getRpcUrl();
-  return rpcUrl
+  // 优先用环境变量配置的 WebSocket URL
+  const explicit = process.env.SOLANA_WS_URL?.trim();
+  if (explicit) return explicit;
+  // 否则从 RPC URL 推导
+  return getRpcUrl()
     .replace('https://', 'wss://')
     .replace('http://', 'ws://');
 }
@@ -78,19 +82,18 @@ function connect() {
     return;
   }
 
-  const wsUrl = getWsUrl();
-  // 只监控前 10 个高质量钱包（WebSocket 订阅数量有限）
+  // 按综合质量排序（胜率 × 平均 ROI），取前 10
   const watchList = wallets
     .sort((a, b) => (b.winRate * b.avgROI) - (a.winRate * a.avgROI))
     .slice(0, 10);
 
+  const wsUrl = getWsUrl();
   console.log(`[SmartMoneyWatch] 监控 ${watchList.length} 个聪明钱钱包`);
 
   ws = new WebSocket(wsUrl);
 
   ws.on('open', () => {
     console.log('[SmartMoneyWatch] ✅ WebSocket 已连接');
-    // 为每个钱包订阅日志
     for (const wallet of watchList) {
       subscribeWallet(wallet.address, wallet.label);
     }
@@ -130,7 +133,6 @@ function subscribeWallet(address: string, label: string) {
     ],
   }));
 
-  // 保存 wallet 地址和 id 的映射关系
   walletIdMap.set(id, { address, label });
 }
 
@@ -161,26 +163,79 @@ function handleMessage(msg: any) {
     const logs: string[] = value.logs || [];
     const signature: string = value.signature || '';
 
-    // 检查是否是 DEX swap 交易（买入操作）
+    // 快速过滤：必须是 DEX swap 交易
     const isDexSwap = logs.some(
       (log: string) => [...DEX_PROGRAMS].some(prog => log.includes(prog))
     );
     if (!isDexSwap) return;
 
-    // 检测是否是买入（涉及 SOL 转出 + token 转入）
-    const isBuy = logs.some(
-      (log: string) => log.includes('Transfer') || log.includes('swap')
-    );
-    if (!isBuy) return;
+    // 异步解析实际交易方向和 token
+    processTransaction(walletInfo, signature);
+  }
+}
 
-    // 提取涉及的 token mint
-    const tokenMint = extractTokenMintFromLogs(logs);
-    if (!tokenMint) return;
-
+// 用 getTransaction 解析实际买卖方向
+async function processTransaction(
+  walletInfo: { address: string; label: string },
+  signature: string,
+) {
+  try {
     // 去重
-    const dedupeKey = `${walletInfo.address}:${tokenMint}`;
+    const dedupeKey = `${walletInfo.address}:${signature}`;
     if (recentBuys.has(dedupeKey)) return;
     recentBuys.set(dedupeKey, Date.now());
+
+    // 获取交易详情
+    const res = await rpcFetch({
+      method: 'getTransaction',
+      params: [
+        signature,
+        { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 },
+      ],
+    });
+
+    if (!res?.result) return;
+
+    const tx = res.result;
+    const preBalances: any[] = tx.meta?.preTokenBalances || [];
+    const postBalances: any[] = tx.meta?.postTokenBalances || [];
+    const accountKeys: string[] = tx.transaction?.message?.accountKeys
+      ?.map((k: any) => typeof k === 'string' ? k : k.pubkey) || [];
+
+    // 判断是否是买入：钱包地址的 SOL 余额减少（付出 SOL）
+    const walletIndex = accountKeys.indexOf(walletInfo.address);
+    if (walletIndex < 0) return;
+
+    const preSol = tx.meta?.preBalances?.[walletIndex] || 0;
+    const postSol = tx.meta?.postBalances?.[walletIndex] || 0;
+    const solChange = postSol - preSol;
+
+    // 买入 = SOL 减少（付出 SOL 换 token）
+    if (solChange >= 0) return; // SOL 增加 = 卖出，跳过
+
+    // 找出钱包获得的 token（post > pre 且 owner 是钱包地址）
+    const gainedMints: string[] = [];
+    for (const post of postBalances) {
+      if (post.owner !== walletInfo.address) continue;
+      const pre = preBalances.find(
+        (p: any) => p.mint === post.mint && p.owner === walletInfo.address
+      );
+      const preAmount = parseFloat(pre?.uiTokenAmount?.uiAmountString || '0');
+      const postAmount = parseFloat(post.uiTokenAmount?.uiAmountString || '0');
+      if (postAmount > preAmount && post.mint !== WSOL_MINT) {
+        gainedMints.push(post.mint);
+      }
+    }
+
+    if (gainedMints.length === 0) return;
+
+    // 取获得量最大的 token
+    const tokenMint = gainedMints[0];
+
+    // 二次去重（wallet + token）
+    const tokenDedupeKey = `${walletInfo.address}:${tokenMint}`;
+    if (recentBuys.has(tokenDedupeKey)) return;
+    recentBuys.set(tokenDedupeKey, Date.now());
 
     const event: SmartMoneyBuyEvent = {
       walletAddress: walletInfo.address,
@@ -190,7 +245,7 @@ function handleMessage(msg: any) {
       timestamp: Date.now(),
     };
 
-    console.log(`[SmartMoneyWatch] 🐋 ${walletInfo.label} 买入新 token: ${tokenMint.slice(0, 12)}...`);
+    console.log(`[SmartMoneyWatch] 🐋 ${walletInfo.label} 买入: ${tokenMint.slice(0, 12)}... (SOL: ${(solChange / 1e9).toFixed(4)})`);
 
     for (const cb of callbacks) {
       try {
@@ -199,29 +254,9 @@ function handleMessage(msg: any) {
         console.error('[SmartMoneyWatch] 回调执行错误:', err);
       }
     }
+  } catch (err) {
+    // getTransaction 可能暂时查不到（刚上链），静默忽略
   }
-}
-
-function extractTokenMintFromLogs(logs: string[]): string | null {
-  const mintPattern = /[1-9A-HJ-NP-Za-km-z]{32,44}/g;
-  const candidates = new Set<string>();
-
-  for (const log of logs) {
-    const matches = log.match(mintPattern);
-    if (matches) {
-      for (const m of matches) {
-        // 排除已知地址
-        if (m === WSOL_MINT) continue;
-        if (DEX_PROGRAMS.has(m)) continue;
-        if (m.startsWith('1111111111')) continue;
-        if (m.length < 32 || m.length > 44) continue;
-        candidates.add(m);
-      }
-    }
-  }
-
-  // 返回第一个候选 mint
-  return candidates.size > 0 ? [...candidates][0] : null;
 }
 
 function scheduleReconnect() {

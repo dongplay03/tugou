@@ -83,7 +83,7 @@ const SOLANA_RULES: ChainTradingRules = {
     experimentalMinSl: 0.84,
     experimentTimeoutHours: 0.5,
     liquidityRugDropPct: 0.35,      // lowered from 0.48 — exit earlier on liquidity drain
-    rapidLiquidityDrainPct: 0.15,   // NEW: >15% liquidity drop in a single monitoring cycle = emergency
+    rapidLiquidityDrainPct: 0.10,   // 5 秒轮询下 >10% 单周期流失 = 紧急
     priceRugMultiplier: 0.16,
     trailingStop: [
       { minScore: 85, value: 0.34 },

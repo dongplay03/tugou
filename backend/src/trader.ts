@@ -427,6 +427,9 @@ export function manualCloseTrade(tradeId: string): { trade: Trade; alert: Alert 
 
 // ===== 加仓机制 =====
 // 条件：已执行至少 1 次阶梯止盈 + 价格从高点回调 15-25% + ROI 仍为正
+const ADD_POSITION_COOLDOWN_MS = 5 * 60_000; // 5 分钟冷却
+const lastAddPositionTime = new Map<string, number>();
+
 export function tryAddToPosition(
   trade: Trade,
   currentPriceNative: number,
@@ -437,6 +440,10 @@ export function tryAddToPosition(
 
   // 条件 1：至少执行过 1 次阶梯止盈
   if (trade.tieredExitsExecuted < 1) return null;
+
+  // 条件 1.5：冷却时间内不重复加仓
+  const lastAdd = lastAddPositionTime.get(trade.id) || 0;
+  if (Date.now() - lastAdd < ADD_POSITION_COOLDOWN_MS) return null;
 
   // 条件 2：当前 ROI 仍为正（说明趋势没有反转）
   if (trade.currentRoi <= 0) return null;
@@ -461,16 +468,31 @@ export function tryAddToPosition(
 
   if (addAmount < rules.position.minPosition) return null;
 
+  // 记录加仓前的持仓量，用于计算新成本基准
+  const oldAmountSOL = trade.amountSOL;
+
   // 执行加仓
   trade.amountSOL += addAmount;
   trade.tokensAcquired += addAmount / currentPriceNative;
+
+  // 更新成本基准：加权平均入场价
+  const totalSOLInvested = oldAmountSOL + addAmount;
+  if (totalSOLInvested > 0 && trade.tokensAcquired > 0) {
+    trade.entryPriceNative = totalSOLInvested / trade.tokensAcquired;
+    // entryPriceUsd 也同步更新（用当前价格比例）
+    if (currentPriceNative > 0) {
+      trade.entryPriceUsd = trade.entryPriceNative * (trade.currentPriceUsd / currentPriceNative);
+    }
+  }
+
+  lastAddPositionTime.set(trade.id, Date.now());
 
   const alert: Alert = {
     id: `alert-add-${Date.now()}-${trade.tokenSymbol}`,
     timestamp: Date.now(),
     level: 'success',
     title: `📈 加仓: ${trade.tokenSymbol}`,
-    message: `回调 ${(pullback * 100).toFixed(0)}% 加仓 ${addAmount.toFixed(4)} ${rules.unit}（利润加仓，不动本金）`,
+    message: `回调 ${(pullback * 100).toFixed(0)}% 加仓 ${addAmount.toFixed(4)} ${rules.unit}（利润加仓，不动本金）。新均价: $${trade.entryPriceUsd.toFixed(8)}`,
     tokenSymbol: trade.tokenSymbol,
     tokenAddress: trade.tokenAddress,
   };
@@ -481,7 +503,7 @@ export function tryAddToPosition(
     db.saveAlert(alert);
   });
 
-  console.log(`[Trader] 📈 加仓 ${trade.tokenSymbol}: +${addAmount.toFixed(4)} ${rules.unit} (回调 ${(pullback * 100).toFixed(0)}%, 利润加仓)`);
+  console.log(`[Trader] 📈 加仓 ${trade.tokenSymbol}: +${addAmount.toFixed(4)} ${rules.unit} (回调 ${(pullback * 100).toFixed(0)}%, 利润加仓, 新均价 $${trade.entryPriceUsd.toFixed(8)})`);
 
   return { trade, alert };
 }

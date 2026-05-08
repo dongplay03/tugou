@@ -35,8 +35,11 @@ const recentPools = new Map<string, number>();
 const DEDUP_TTL = 5 * 60 * 1000;
 
 function getWsUrl(): string {
-  const rpcUrl = getRpcUrl();
-  return rpcUrl
+  // 优先用环境变量配置的 WebSocket URL
+  const explicit = process.env.SOLANA_WS_URL?.trim();
+  if (explicit) return explicit;
+  // 否则从 RPC URL 推导
+  return getRpcUrl()
     .replace('https://', 'wss://')
     .replace('http://', 'ws://');
 }

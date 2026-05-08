@@ -116,13 +116,13 @@ export function startMonitoring() {
     });
   }, 45_000);
 
-  // 价格监控 + 动量观察池更新：每 10 秒
+  // 价格监控 + 动量观察池更新：5 秒轮询（Rug 秒级事件）
   monitorInterval = setInterval(() => {
     monitorOpenPositions().catch(err => {
       console.error('[Monitor] Price monitoring error:', err);
       errorCount++;
     });
-  }, 10_000);
+  }, 5_000);
 
   // Portfolio snapshot: every 5 minutes
   snapshotInterval = setInterval(() => {
@@ -888,9 +888,10 @@ async function processRealtimeDiscovery(pair: DexScreenerPair, source: string) {
   if (!assessed) return;
 
   const { tokenData, result } = assessed;
-  // 实时发现的 token 额外加 8 分（信息优势）
-  tokenData.screeningScore += 8;
-  tokenData.screeningPassed = [...tokenData.screeningPassed, `🚀 ${source} (+8)`];
+  // 实时发现的 token 加分：基础分越高加越多（信息优势分层）
+  const rtBonus = result.score >= 70 ? 5 : result.score >= 50 ? 3 : 1;
+  tokenData.screeningScore += rtBonus;
+  tokenData.screeningPassed = [...tokenData.screeningPassed, `🚀 ${source} (+${rtBonus})`];
 
   db.saveToken(tokenData);
   tokensScreenedCount++;
